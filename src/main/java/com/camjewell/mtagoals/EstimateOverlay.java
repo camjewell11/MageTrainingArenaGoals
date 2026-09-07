@@ -19,11 +19,12 @@ import net.runelite.client.ui.overlay.components.LineComponent;
 
 /**
  * Estimates how much longer it'll take to reach the tracked reward goal, per room. Telekinetic
- * and Graveyard have a fixed points-per-action rate the game defines, so they're shown as
- * actions remaining. Alchemist is likewise fixed, but also nets out gold already sitting
- * un-deposited in the inventory. Enchantment has no fixed rate at all (it depends on spell
- * level, dragonstone luck and playstyle), so it's shown as an estimated time remaining based on
- * this session's observed rate instead.
+ * has a fixed points-per-action rate the game defines, so it's shown as actions remaining.
+ * Alchemist and Graveyard are likewise fixed, but also read the live inventory (held un-deposited
+ * training gold for Alchemist; actual free carrying capacity for Graveyard) rather than assuming
+ * a static number. Enchantment has no fixed rate at all (it depends on spell level, dragonstone
+ * luck and playstyle), so it's shown as an estimated time remaining based on this session's
+ * observed rate instead.
  */
 class EstimateOverlay extends OverlayPanel
 {
@@ -37,7 +38,26 @@ class EstimateOverlay extends OverlayPanel
 	private static final int ALCHEMIST_GOLD_PER_ALCH = 30;
 	private static final int ALCHEMIST_GOLD_PER_POINT = 100;
 
-	private static final int GRAVEYARD_INVENTORY_SIZE = 23;
+	/**
+	 * The Alchemist's Playground pays out in a room-specific "training gold" currency, not real
+	 * Coins (995) - confirmed via Widget Inspector: the inventory slot displaying "Coins" was
+	 * actually ItemID.MAGICTRAINING_COINS (8890), and its quantity (150) matched exactly 5 alchs
+	 * worth (5 x 30 gold). The _2 through _10000 variants are presumably alternate quantity-tier
+	 * sprites for the same stackable currency; checking all of them defends against an ID swap at
+	 * a higher stack size that hasn't been observed yet.
+	 */
+	private static final int[] ALCHEMIST_GOLD_ITEM_IDS = {
+		ItemID.MAGICTRAINING_COINS,
+		ItemID.MAGICTRAINING_COINS_2,
+		ItemID.MAGICTRAINING_COINS_3,
+		ItemID.MAGICTRAINING_COINS_4,
+		ItemID.MAGICTRAINING_COINS_5,
+		ItemID.MAGICTRAINING_COINS_25,
+		ItemID.MAGICTRAINING_COINS_100,
+		ItemID.MAGICTRAINING_COINS_250,
+		ItemID.MAGICTRAINING_COINS_1000,
+		ItemID.MAGICTRAINING_COINS_10000,
+	};
 
 	private final MtaGoalsPlugin plugin;
 	private final MtaGoalsConfig config;
@@ -84,11 +104,7 @@ class EstimateOverlay extends OverlayPanel
 			remaining -> Math.ceil(remaining / TELEKINETIC_AVG_POINTS_PER_MAZE));
 
 		addAlchemistRow(goal);
-
-		int pointsPerInventory = GRAVEYARD_INVENTORY_SIZE / config.graveyardFruit().fruitPerPoint();
-		addActionsRow("Graveyard", goal, PizazzRoom.GRAVEYARD, "inventories",
-			remaining -> Math.ceil(remaining / (double) pointsPerInventory));
-
+		addGraveyardRow(goal);
 		addEnchantmentRow(goal);
 
 		return super.render(graphics);
@@ -114,9 +130,9 @@ class EstimateOverlay extends OverlayPanel
 	}
 
 	/**
-	 * Nets out gold already sitting in the inventory (alched but not yet deposited) against the
-	 * gold still needed, so the item count ticks down the instant you alch something rather than
-	 * only after you walk over and deposit it.
+	 * Nets out training gold already sitting in the inventory (alched but not yet deposited)
+	 * against the gold still needed, so the item count ticks down the instant you alch something
+	 * rather than only after you walk over and deposit it.
 	 */
 	private void addAlchemistRow(Goal goal)
 	{
@@ -134,9 +150,42 @@ class EstimateOverlay extends OverlayPanel
 		}
 
 		int goldNeeded = pointsRemaining * ALCHEMIST_GOLD_PER_POINT;
-		int netGoldNeeded = Math.max(goldNeeded - getInventoryCoins(), 0);
+		int netGoldNeeded = Math.max(goldNeeded - getAlchemistGold(), 0);
 		int items = (int) Math.ceil(netGoldNeeded / (double) ALCHEMIST_GOLD_PER_ALCH);
 		addRow("Alchemist:", items + " items", Color.WHITE, false);
+	}
+
+	/**
+	 * Uses actual current free inventory capacity for the selected fruit (total slots minus
+	 * whatever's occupied by other items right now) rather than assuming a fixed inventory size,
+	 * since how many slots a player reserves for tools/teleports varies.
+	 */
+	private void addGraveyardRow(Goal goal)
+	{
+		Goal.RoomProgress progress = goal.getRoomProgress(PizazzRoom.GRAVEYARD);
+		if (progress == null)
+		{
+			return;
+		}
+
+		int remaining = Math.max(progress.goalAmount() - progress.currentAmount(), 0);
+		if (remaining <= 0)
+		{
+			addRow("Graveyard:", "Done", Color.GREEN, false);
+			return;
+		}
+
+		GraveyardFruit fruit = config.graveyardFruit();
+		int availableSlots = getGraveyardCapacity(fruit);
+		int pointsPerInventory = availableSlots / fruit.fruitPerPoint();
+		if (pointsPerInventory <= 0)
+		{
+			addRow("Graveyard:", "free up space", Color.GRAY, false);
+			return;
+		}
+
+		int inventories = (int) Math.ceil(remaining / (double) pointsPerInventory);
+		addRow("Graveyard:", inventories + " inventories", Color.WHITE, false);
 	}
 
 	private void addEnchantmentRow(Goal goal)
@@ -165,22 +214,46 @@ class EstimateOverlay extends OverlayPanel
 		addRow("Enchantment:", "~" + minutes + " min", Color.WHITE, false);
 	}
 
-	private int getInventoryCoins()
+	private int getAlchemistGold()
 	{
 		ItemContainer inventory = client.getItemContainer(InventoryID.INV);
 		if (inventory == null)
 		{
 			return 0;
 		}
-		int coins = 0;
+		int gold = 0;
 		for (Item item : inventory.getItems())
 		{
-			if (item.getId() == ItemID.COINS)
+			for (int goldItemId : ALCHEMIST_GOLD_ITEM_IDS)
 			{
-				coins += item.getQuantity();
+				if (item.getId() == goldItemId)
+				{
+					gold += item.getQuantity();
+					break;
+				}
 			}
 		}
-		return coins;
+		return gold;
+	}
+
+	private int getGraveyardCapacity(GraveyardFruit fruit)
+	{
+		ItemContainer inventory = client.getItemContainer(InventoryID.INV);
+		if (inventory == null)
+		{
+			return 0;
+		}
+		int fruitItemId = fruit == GraveyardFruit.PEACHES ? ItemID.PEACH : ItemID.BANANA;
+		Item[] items = inventory.getItems();
+		int reserved = 0;
+		for (Item item : items)
+		{
+			if (item.getId() != -1 && item.getId() != fruitItemId)
+			{
+				reserved++;
+			}
+		}
+		return Math.max(items.length - reserved, 0);
 	}
 
 	private void addRow(String left, String right, Color rightColor, boolean header)
