@@ -139,6 +139,21 @@ class GoalOverlay extends OverlayPanel
 		progressBar.setRightLabel(QuantityFormatter.quantityToStackSize(data.currentAmount())
 			+ "/" + QuantityFormatter.quantityToStackSize(data.goalAmount()));
 
+		// Alchemist earns training gold into the inventory before it's deposited into banked
+		// points, so tint the portion of the remaining bar that depositing held gold would
+		// close - a translucent version of the room's own fill color, so it reads as "this
+		// much more, pending" rather than a whole new color in the palette.
+		if (room == PizazzRoom.ALCHEMIST && data.goalAmount() > 0)
+		{
+			double pendingFraction = plugin.getAlchemistHeldPoints() / (double) data.goalAmount();
+			if (pendingFraction > 0)
+			{
+				Color base = room.color();
+				progressBar.setPendingPercentage(pendingFraction);
+				progressBar.setPendingColor(new Color(base.getRed(), base.getGreen(), base.getBlue(), 120));
+			}
+		}
+
 		int remaining = Math.max(data.goalAmount() - data.currentAmount(), 0);
 		String remainingText = remaining > 0 ? "(" + QuantityFormatter.quantityToStackSize(remaining) + ")" : "";
 

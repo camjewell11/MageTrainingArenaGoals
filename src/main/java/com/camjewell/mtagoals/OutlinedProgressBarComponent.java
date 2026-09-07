@@ -11,7 +11,9 @@ import net.runelite.client.ui.overlay.components.LayoutableRenderableEntity;
 import net.runelite.client.ui.overlay.components.TextComponent;
 
 /**
- * A simple filled progress bar with outlined (readable-over-fill) left/center/right labels.
+ * A simple filled progress bar with outlined (readable-over-fill) left/center/right labels, and
+ * an optional second "pending" segment immediately after the main fill - e.g. to show how much
+ * further a not-yet-confirmed amount (gold held but not yet deposited) would push progress.
  */
 class OutlinedProgressBarComponent implements LayoutableRenderableEntity
 {
@@ -19,10 +21,12 @@ class OutlinedProgressBarComponent implements LayoutableRenderableEntity
 	private static final int TEXT_PADDING = 4;
 
 	private double percentage = 0.0;
+	private double pendingPercentage = 0.0;
 	private String leftLabel = "";
 	private String centerLabel = "";
 	private String rightLabel = "";
 	private Color foregroundColor = Color.GREEN;
+	private Color pendingColor = null;
 	private Color backgroundColor = new Color(61, 56, 49);
 
 	private Point preferredLocation = new Point();
@@ -32,6 +36,21 @@ class OutlinedProgressBarComponent implements LayoutableRenderableEntity
 	void setPercentage(double percentage)
 	{
 		this.percentage = Math.max(0, Math.min(1, percentage));
+	}
+
+	/**
+	 * Fraction of the bar (beyond {@link #percentage}) to fill with {@link #pendingColor},
+	 * clamped so the two segments together never exceed 100%. 0 (the default) draws no pending
+	 * segment at all.
+	 */
+	void setPendingPercentage(double pendingPercentage)
+	{
+		this.pendingPercentage = Math.max(0, pendingPercentage);
+	}
+
+	void setPendingColor(Color c)
+	{
+		this.pendingColor = c;
 	}
 
 	void setLeftLabel(String s)
@@ -73,6 +92,17 @@ class OutlinedProgressBarComponent implements LayoutableRenderableEntity
 		int fillWidth = (int) (width * percentage);
 		graphics.setColor(foregroundColor);
 		graphics.fillRect(x, y, fillWidth, height);
+
+		if (pendingPercentage > 0 && pendingColor != null)
+		{
+			int pendingEndWidth = (int) (width * Math.min(percentage + pendingPercentage, 1.0));
+			int pendingWidth = pendingEndWidth - fillWidth;
+			if (pendingWidth > 0)
+			{
+				graphics.setColor(pendingColor);
+				graphics.fillRect(x + fillWidth, y, pendingWidth, height);
+			}
+		}
 
 		FontMetrics fm = graphics.getFontMetrics();
 		int textY = y + (height + fm.getAscent()) / 2 - 1;

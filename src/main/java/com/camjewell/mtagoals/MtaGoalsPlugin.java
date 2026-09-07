@@ -479,6 +479,15 @@ public class MtaGoalsPlugin extends Plugin
 	}
 
 	/**
+	 * @return how many Alchemist points the currently held (but not yet deposited) training gold
+	 * is worth once deposited - used to show how far depositing would push progress.
+	 */
+	int getAlchemistHeldPoints()
+	{
+		return getAlchemistGold() / ALCHEMIST_GOLD_PER_POINT;
+	}
+
+	/**
 	 * @return the given room's points-per-minute rate over its rolling window, or null if there
 	 * isn't yet enough active-tick data (or no points have been gained) to trust an estimate.
 	 */
