@@ -140,9 +140,16 @@ class GoalOverlay extends OverlayPanel
 			+ "/" + QuantityFormatter.quantityToStackSize(data.goalAmount()));
 
 		int remaining = Math.max(data.goalAmount() - data.currentAmount(), 0);
-		if (remaining > 0)
+		String remainingText = remaining > 0 ? "(" + QuantityFormatter.quantityToStackSize(remaining) + ")" : "";
+
+		if (config.showRoomPercentages())
 		{
-			progressBar.setCenterLabel("(" + QuantityFormatter.quantityToStackSize(remaining) + ")");
+			String percentText = DECIMAL_FORMAT.format(data.percentageToGoal() * 100) + "%";
+			progressBar.setCenterLabel(remainingText.isEmpty() ? percentText : percentText + " " + remainingText);
+		}
+		else if (!remainingText.isEmpty())
+		{
+			progressBar.setCenterLabel(remainingText);
 		}
 
 		panelComponent.getChildren().add(progressBar);

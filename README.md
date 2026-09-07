@@ -27,7 +27,9 @@ reward-tracking overlay.
   - If you ever want to preview the overlay without being in the arena, flip
     on **Use manual point totals** and type your totals in instead.
 - **Overlay**: shows the tracked reward(s), overall percent complete, and a
-  progress bar per room with current/goal amounts.
+  progress bar per room with current/goal amounts and (toggle: **Show
+  percent complete per room**, default on) that room's own percent
+  complete alongside the remaining amount.
 - **Completion Estimates** (config, second overlay): how much longer until
   the tracked goal is met, per room.
   - **Telekinetic**: mazes remaining, from the fixed 3.6 pts/maze

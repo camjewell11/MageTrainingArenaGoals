@@ -281,6 +281,19 @@ public interface MtaGoalsConfig extends Config
 		return true;
 	}
 
+	@ConfigItem(
+		section = OVERLAY,
+		keyName = "showRoomPercentages",
+		name = "Show percent complete per room",
+		description = "Adds each room's percent-complete to its progress bar, alongside the existing "
+			+ "current/goal and remaining-amount labels",
+		position = 2
+	)
+	default boolean showRoomPercentages()
+	{
+		return true;
+	}
+
 	@ConfigSection(
 		name = "Completion Estimates",
 		description = "A second overlay estimating how much longer until your tracked reward goals are met.",
