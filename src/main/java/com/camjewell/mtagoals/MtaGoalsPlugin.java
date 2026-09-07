@@ -5,10 +5,13 @@ import javax.inject.Inject;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.Client;
 import net.runelite.api.GameState;
+import net.runelite.api.Item;
+import net.runelite.api.ItemContainer;
 import net.runelite.api.Player;
 import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.GameTick;
 import net.runelite.api.gameval.InterfaceID;
+import net.runelite.api.gameval.InventoryID;
 import net.runelite.api.widgets.Widget;
 import net.runelite.client.Notifier;
 import net.runelite.client.config.ConfigManager;
@@ -112,6 +115,9 @@ public class MtaGoalsPlugin extends Plugin
 	private int enchantBaselinePoints = -1;
 	private int enchantActiveTicks = 0;
 
+	private PizazzRoom lastRoom = null;
+	private int graveyardCapacitySnapshot = -1;
+
 	@Provides
 	MtaGoalsConfig provideConfig(ConfigManager configManager)
 	{
@@ -128,6 +134,8 @@ public class MtaGoalsPlugin extends Plugin
 		previouslyMetThreshold = false;
 		enchantBaselinePoints = -1;
 		enchantActiveTicks = 0;
+		lastRoom = null;
+		graveyardCapacitySnapshot = -1;
 		refresh();
 	}
 
@@ -147,6 +155,8 @@ public class MtaGoalsPlugin extends Plugin
 			readingFromHud = false;
 			enchantBaselinePoints = -1;
 			enchantActiveTicks = 0;
+			lastRoom = null;
+			graveyardCapacitySnapshot = -1;
 		}
 	}
 
@@ -197,8 +207,53 @@ public class MtaGoalsPlugin extends Plugin
 	private void refresh()
 	{
 		updateCurrentPoints();
+		updateGraveyardCapacitySnapshot();
 		goal.recalculate(config, currentPoints);
 		checkThresholdNotification();
+	}
+
+	/**
+	 * Snapshots free inventory capacity once, right when the player enters the Creature
+	 * Graveyard, rather than re-scanning every tick. The inventory cycles full/empty
+	 * continuously during actual play (fill with fruit, deposit, repeat), so a live per-tick
+	 * scan would need to correctly identify the fruit item to exclude it from "reserved" slots -
+	 * a snapshot on entry sidesteps that entirely, since it's taken before any fruit is held.
+	 */
+	private void updateGraveyardCapacitySnapshot()
+	{
+		PizazzRoom room = currentRoom();
+		if (room == PizazzRoom.GRAVEYARD && lastRoom != PizazzRoom.GRAVEYARD)
+		{
+			graveyardCapacitySnapshot = countEmptyInventorySlots();
+		}
+		lastRoom = room;
+	}
+
+	/**
+	 * @return the free-inventory-capacity snapshot taken on entering the Creature Graveyard this
+	 * visit, or 0 if the player hasn't been in the room yet this session.
+	 */
+	int getGraveyardCapacity()
+	{
+		return Math.max(graveyardCapacitySnapshot, 0);
+	}
+
+	private int countEmptyInventorySlots()
+	{
+		ItemContainer inventory = client.getItemContainer(InventoryID.INV);
+		if (inventory == null)
+		{
+			return 0;
+		}
+		int empty = 0;
+		for (Item item : inventory.getItems())
+		{
+			if (item.getId() == -1)
+			{
+				empty++;
+			}
+		}
+		return empty;
 	}
 
 	private void updateCurrentPoints()

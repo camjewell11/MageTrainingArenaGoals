@@ -156,9 +156,9 @@ class EstimateOverlay extends OverlayPanel
 	}
 
 	/**
-	 * Uses actual current free inventory capacity for the selected fruit (total slots minus
-	 * whatever's occupied by other items right now) rather than assuming a fixed inventory size,
-	 * since how many slots a player reserves for tools/teleports varies.
+	 * Uses the free-inventory-capacity snapshot the plugin took when the player entered the
+	 * Creature Graveyard (rather than assuming a fixed inventory size or re-scanning the
+	 * inventory live), since the inventory cycles full/empty continuously during actual play.
 	 */
 	private void addGraveyardRow(Goal goal)
 	{
@@ -175,12 +175,11 @@ class EstimateOverlay extends OverlayPanel
 			return;
 		}
 
-		GraveyardFruit fruit = config.graveyardFruit();
-		int availableSlots = getGraveyardCapacity(fruit);
-		int pointsPerInventory = availableSlots / fruit.fruitPerPoint();
+		int availableSlots = plugin.getGraveyardCapacity();
+		int pointsPerInventory = availableSlots / config.graveyardFruit().fruitPerPoint();
 		if (pointsPerInventory <= 0)
 		{
-			addRow("Graveyard:", "free up space", Color.GRAY, false);
+			addRow("Graveyard:", "visit the room first", Color.GRAY, false);
 			return;
 		}
 
@@ -234,26 +233,6 @@ class EstimateOverlay extends OverlayPanel
 			}
 		}
 		return gold;
-	}
-
-	private int getGraveyardCapacity(GraveyardFruit fruit)
-	{
-		ItemContainer inventory = client.getItemContainer(InventoryID.INV);
-		if (inventory == null)
-		{
-			return 0;
-		}
-		int fruitItemId = fruit == GraveyardFruit.PEACHES ? ItemID.PEACH : ItemID.BANANA;
-		Item[] items = inventory.getItems();
-		int reserved = 0;
-		for (Item item : items)
-		{
-			if (item.getId() != -1 && item.getId() != fruitItemId)
-			{
-				reserved++;
-			}
-		}
-		return Math.max(items.length - reserved, 0);
 	}
 
 	private void addRow(String left, String right, Color rightColor, boolean header)
