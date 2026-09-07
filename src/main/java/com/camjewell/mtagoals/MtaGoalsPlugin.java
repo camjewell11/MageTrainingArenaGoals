@@ -1,6 +1,7 @@
 package com.camjewell.mtagoals;
 
 import com.google.inject.Provides;
+import java.util.Arrays;
 import javax.inject.Inject;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.Client;
@@ -74,18 +75,21 @@ public class MtaGoalsPlugin extends Plugin
 	private static final int PLANE_ALCHEMIST = 2;
 
 	/**
-	 * Enchantment has no fixed points-per-action (it depends on spell level and dragonstone
-	 * doubling), so its completion estimate uses an observed points-per-minute rate instead:
-	 * points gained since the first reading this session, divided by ticks actually spent in
-	 * the room (idle/away time excluded). One game tick is 0.6s, so 100 ticks = 1 minute.
+	 * Every room's completion estimate can show an observed points-per-minute rate alongside
+	 * (or, for Enchantment, instead of) its fixed-formula action count: points gained since the
+	 * first reading this session in that room, divided by ticks actually spent playing it
+	 * (idle/away time excluded). One game tick is 0.6s, so 100 ticks = 1 minute. This is the
+	 * only way to estimate Enchantment at all (spell level and dragonstone luck vary too much
+	 * for a fixed formula); for the other three rooms it turns their exact action count into a
+	 * real-world time estimate, since how fast a player completes each action varies by skill.
 	 */
 	private static final int TICKS_PER_MINUTE = 100;
 
 	/**
-	 * Minimum active ticks in the Enchanting Chamber before trusting the observed rate enough
-	 * to show an estimate, so a couple of lucky/unlucky early casts don't produce a wild number.
+	 * Minimum active ticks in a room before trusting its observed rate enough to show an
+	 * estimate, so a couple of lucky/unlucky early actions don't produce a wild number.
 	 */
-	private static final int MIN_TICKS_FOR_ENCHANT_ESTIMATE = TICKS_PER_MINUTE;
+	private static final int MIN_TICKS_FOR_RATE_ESTIMATE = TICKS_PER_MINUTE;
 
 	@Inject
 	private Client client;
@@ -112,8 +116,8 @@ public class MtaGoalsPlugin extends Plugin
 	private boolean readingFromHud = false;
 	private boolean previouslyMetThreshold = false;
 
-	private int enchantBaselinePoints = -1;
-	private int enchantActiveTicks = 0;
+	private final int[] roomRateBaselinePoints = new int[PizazzRoom.ENTRIES.length];
+	private final int[] roomRateActiveTicks = new int[PizazzRoom.ENTRIES.length];
 
 	private PizazzRoom lastRoom = null;
 	private int graveyardCapacitySnapshot = -1;
@@ -132,8 +136,7 @@ public class MtaGoalsPlugin extends Plugin
 		livePointsAvailable = false;
 		readingFromHud = false;
 		previouslyMetThreshold = false;
-		enchantBaselinePoints = -1;
-		enchantActiveTicks = 0;
+		resetRoomRates();
 		lastRoom = null;
 		graveyardCapacitySnapshot = -1;
 		refresh();
@@ -153,8 +156,7 @@ public class MtaGoalsPlugin extends Plugin
 		{
 			livePointsAvailable = false;
 			readingFromHud = false;
-			enchantBaselinePoints = -1;
-			enchantActiveTicks = 0;
+			resetRoomRates();
 			lastRoom = null;
 			graveyardCapacitySnapshot = -1;
 		}
@@ -283,10 +285,7 @@ public class MtaGoalsPlugin extends Plugin
 		{
 			livePointsAvailable = true;
 			readingFromHud = true;
-			if (activeRoom == PizazzRoom.ENCHANTMENT)
-			{
-				updateEnchantmentRate();
-			}
+			updateRoomRate(activeRoom);
 			return;
 		}
 
@@ -362,40 +361,48 @@ public class MtaGoalsPlugin extends Plugin
 		return null;
 	}
 
-	/**
-	 * Advances the Enchanting Chamber's observed-rate tracking by one active tick. Establishes
-	 * a fresh baseline (rather than accumulating) the first time this session, or whenever the
-	 * total drops below the current baseline (e.g. the player spent points on a purchase),
-	 * so the rate never goes negative or counts a purchase as "zero points earned".
-	 */
-	private void updateEnchantmentRate()
+	private void resetRoomRates()
 	{
-		int points = currentPoints[PizazzRoom.ENCHANTMENT.ordinal()];
-		if (enchantBaselinePoints < 0 || points < enchantBaselinePoints)
-		{
-			enchantBaselinePoints = points;
-			enchantActiveTicks = 0;
-			return;
-		}
-		enchantActiveTicks++;
+		Arrays.fill(roomRateBaselinePoints, -1);
+		Arrays.fill(roomRateActiveTicks, 0);
 	}
 
 	/**
-	 * @return observed Enchantment points-per-minute this session, or null if there isn't yet
-	 * enough active-tick data (or no points have been gained) to trust an estimate.
+	 * Advances the given room's observed-rate tracking by one active tick. Establishes a fresh
+	 * baseline (rather than accumulating) the first time this session, or whenever the total
+	 * drops below the current baseline (e.g. the player spent points on a purchase), so the
+	 * rate never goes negative or counts a purchase as "zero points earned".
 	 */
-	Double getEnchantmentPointsPerMinute()
+	private void updateRoomRate(PizazzRoom room)
 	{
-		if (enchantBaselinePoints < 0 || enchantActiveTicks < MIN_TICKS_FOR_ENCHANT_ESTIMATE)
+		int idx = room.ordinal();
+		int points = currentPoints[idx];
+		if (roomRateBaselinePoints[idx] < 0 || points < roomRateBaselinePoints[idx])
+		{
+			roomRateBaselinePoints[idx] = points;
+			roomRateActiveTicks[idx] = 0;
+			return;
+		}
+		roomRateActiveTicks[idx]++;
+	}
+
+	/**
+	 * @return the given room's observed points-per-minute this session, or null if there isn't
+	 * yet enough active-tick data (or no points have been gained) to trust an estimate.
+	 */
+	Double getPointsPerMinute(PizazzRoom room)
+	{
+		int idx = room.ordinal();
+		if (roomRateBaselinePoints[idx] < 0 || roomRateActiveTicks[idx] < MIN_TICKS_FOR_RATE_ESTIMATE)
 		{
 			return null;
 		}
-		int gained = currentPoints[PizazzRoom.ENCHANTMENT.ordinal()] - enchantBaselinePoints;
+		int gained = currentPoints[idx] - roomRateBaselinePoints[idx];
 		if (gained <= 0)
 		{
 			return null;
 		}
-		return gained * (double) TICKS_PER_MINUTE / enchantActiveTicks;
+		return gained * (double) TICKS_PER_MINUTE / roomRateActiveTicks[idx];
 	}
 
 	private boolean tryUpdateRoom(PizazzRoom room, int interfaceId)

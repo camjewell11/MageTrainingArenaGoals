@@ -312,4 +312,17 @@ public interface MtaGoalsConfig extends Config
 	{
 		return GraveyardFruit.BANANAS;
 	}
+
+	@ConfigItem(
+		section = ESTIMATES,
+		keyName = "showTimeEstimates",
+		name = "Show time estimates",
+		description = "Adds an estimated time in parentheses next to the Telekinetic/Alchemist/Graveyard action "
+			+ "counts, based on your observed pace in that room this session",
+		position = 2
+	)
+	default boolean showTimeEstimates()
+	{
+		return true;
+	}
 }

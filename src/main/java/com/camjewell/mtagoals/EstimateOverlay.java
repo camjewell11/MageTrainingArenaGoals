@@ -18,13 +18,14 @@ import net.runelite.client.ui.overlay.OverlayPosition;
 import net.runelite.client.ui.overlay.components.LineComponent;
 
 /**
- * Estimates how much longer it'll take to reach the tracked reward goal, per room. Telekinetic
- * has a fixed points-per-action rate the game defines, so it's shown as actions remaining.
- * Alchemist and Graveyard are likewise fixed, but also read the live inventory (held un-deposited
- * training gold for Alchemist; actual free carrying capacity for Graveyard) rather than assuming
- * a static number. Enchantment has no fixed rate at all (it depends on spell level, dragonstone
- * luck and playstyle), so it's shown as an estimated time remaining based on this session's
- * observed rate instead.
+ * Estimates how much longer it'll take to reach the tracked reward goal, per room. Telekinetic,
+ * Alchemist and Graveyard each have a fixed points-per-action rate the game defines, so they're
+ * shown as an exact action count (Alchemist also nets out held un-deposited training gold;
+ * Graveyard uses a free-inventory-capacity snapshot from room entry) - optionally followed by a
+ * "(~X min)"/"(~X.Y hr)" real-world time estimate from this session's observed pace in that
+ * room, since how fast a player completes each action varies by skill. Enchantment has no fixed
+ * rate at all (it depends on spell level, dragonstone luck and playstyle), so it's shown as an
+ * estimated time remaining from that same observed-rate mechanism instead of an action count.
  */
 class EstimateOverlay extends OverlayPanel
 {
@@ -126,7 +127,7 @@ class EstimateOverlay extends OverlayPanel
 		}
 
 		int actions = (int) actionsForRemaining.applyAsDouble(remaining);
-		addRow(label + ":", actions + " " + unit, Color.WHITE, false);
+		addRow(label + ":", actions + " " + unit + formatTimeSuffix(room, remaining), Color.WHITE, false);
 	}
 
 	/**
@@ -152,7 +153,9 @@ class EstimateOverlay extends OverlayPanel
 		int goldNeeded = pointsRemaining * ALCHEMIST_GOLD_PER_POINT;
 		int netGoldNeeded = Math.max(goldNeeded - getAlchemistGold(), 0);
 		int items = (int) Math.ceil(netGoldNeeded / (double) ALCHEMIST_GOLD_PER_ALCH);
-		addRow("Alchemist:", items + " items", Color.WHITE, false);
+		int effectivePointsRemaining = (int) Math.ceil(netGoldNeeded / (double) ALCHEMIST_GOLD_PER_POINT);
+		String text = items + " items" + formatTimeSuffix(PizazzRoom.ALCHEMIST, effectivePointsRemaining);
+		addRow("Alchemist:", text, Color.WHITE, false);
 	}
 
 	/**
@@ -184,7 +187,8 @@ class EstimateOverlay extends OverlayPanel
 		}
 
 		int inventories = (int) Math.ceil(remaining / (double) pointsPerInventory);
-		addRow("Graveyard:", inventories + " inventories", Color.WHITE, false);
+		String text = inventories + " inventories" + formatTimeSuffix(PizazzRoom.GRAVEYARD, remaining);
+		addRow("Graveyard:", text, Color.WHITE, false);
 	}
 
 	private void addEnchantmentRow(Goal goal)
@@ -202,15 +206,43 @@ class EstimateOverlay extends OverlayPanel
 			return;
 		}
 
-		Double pointsPerMinute = plugin.getEnchantmentPointsPerMinute();
+		Double pointsPerMinute = plugin.getPointsPerMinute(PizazzRoom.ENCHANTMENT);
 		if (pointsPerMinute == null)
 		{
 			addRow("Enchantment:", "collecting data…", Color.GRAY, false);
 			return;
 		}
 
-		int minutes = (int) Math.ceil(remaining / pointsPerMinute);
-		addRow("Enchantment:", "~" + minutes + " min", Color.WHITE, false);
+		addRow("Enchantment:", "~" + formatMinutes(remaining / pointsPerMinute), Color.WHITE, false);
+	}
+
+	/**
+	 * Optional " (~X min)"/" (~X.Y hr)" suffix for the three fixed-rate rooms, using this
+	 * session's observed pace in that room. Returns "" (no placeholder) whenever the toggle is
+	 * off or there isn't a rate yet, per design - the action count stands alone until there's a
+	 * real value to show next to it.
+	 */
+	private String formatTimeSuffix(PizazzRoom room, int pointsRemaining)
+	{
+		if (!config.showTimeEstimates())
+		{
+			return "";
+		}
+		Double pointsPerMinute = plugin.getPointsPerMinute(room);
+		if (pointsPerMinute == null)
+		{
+			return "";
+		}
+		return " (~" + formatMinutes(pointsRemaining / pointsPerMinute) + ")";
+	}
+
+	private static String formatMinutes(double minutes)
+	{
+		if (minutes < 60)
+		{
+			return Math.max(1, (int) Math.ceil(minutes)) + " min";
+		}
+		return String.format("%.1f hr", minutes / 60.0);
 	}
 
 	private int getAlchemistGold()
