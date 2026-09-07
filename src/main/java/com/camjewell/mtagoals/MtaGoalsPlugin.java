@@ -48,6 +48,17 @@ public class MtaGoalsPlugin extends Plugin
 	private static final int MTA_MAIN_VALUE_ENCHANTMENT = 12;
 	private static final int MTA_MAIN_VALUE_GRAVEYARD = 13;
 
+	/**
+	 * Each room also shows a live "Pizazz Points:" counter for just its own currency while
+	 * you're actually playing it, at the same child ID (6) in every room's interface -
+	 * confirmed via Widget Inspector for Telekinetic, Graveyard and Enchantment (identical
+	 * BACK_MODEL/_A/_B/_PTS widget layout at children 3-6 in all three), inferred for
+	 * Alchemist from that same pattern. Confirmed to be the same all-time banked total as
+	 * the lobby HUD, not a per-visit delta: reading it in Telekinetic went from 46 (the last
+	 * lobby reading) to 48 after completing one maze, matching the wiki's "+2 points per maze".
+	 */
+	private static final int MTA_ROOM_PTS_CHILD = 6;
+
 	@Inject
 	private Client client;
 
@@ -172,13 +183,43 @@ public class MtaGoalsPlugin extends Plugin
 			System.arraycopy(hudPoints, 0, currentPoints, 0, currentPoints.length);
 			livePointsAvailable = true;
 			readingFromHud = true;
+			return;
 		}
-		else
+
+		if (tryUpdateFromRoomWidget())
 		{
-			readingFromHud = false;
-			// Keep the last known totals (if any) rather than zeroing them out just because the
-			// HUD widget isn't on screen right now (e.g. the player stepped into a side room).
+			livePointsAvailable = true;
+			readingFromHud = true;
+			return;
 		}
+
+		readingFromHud = false;
+		// Keep the last known totals (if any) rather than zeroing them out just because neither
+		// the lobby HUD nor a room's live counter is on screen right now (e.g. mid-teleport).
+	}
+
+	/**
+	 * Updates just the one room's total the player is currently playing, from that room's own
+	 * live "Pizazz Points:" counter. Unlike the lobby HUD this never touches the other three
+	 * rooms' totals, since only one room's widget can be on screen at a time.
+	 */
+	private boolean tryUpdateFromRoomWidget()
+	{
+		return tryUpdateRoom(PizazzRoom.TELEKINETIC, InterfaceID.MAGICTRAINING_TELE)
+			|| tryUpdateRoom(PizazzRoom.GRAVEYARD, InterfaceID.MAGICTRAINING_GRAVE)
+			|| tryUpdateRoom(PizazzRoom.ENCHANTMENT, InterfaceID.MAGICTRAINING_ENCHA)
+			|| tryUpdateRoom(PizazzRoom.ALCHEMIST, InterfaceID.MAGICTRAINING_ALCHEM);
+	}
+
+	private boolean tryUpdateRoom(PizazzRoom room, int interfaceId)
+	{
+		Integer value = readValue(interfaceId, MTA_ROOM_PTS_CHILD);
+		if (value == null)
+		{
+			return false;
+		}
+		currentPoints[room.ordinal()] = value;
+		return true;
 	}
 
 	private void checkThresholdNotification()
@@ -200,10 +241,10 @@ public class MtaGoalsPlugin extends Plugin
 	 */
 	private int[] tryReadLobbyHud()
 	{
-		Integer telekinetic = readValue(MTA_MAIN_VALUE_TELEKINETIC);
-		Integer alchemist = readValue(MTA_MAIN_VALUE_ALCHEMIST);
-		Integer enchantment = readValue(MTA_MAIN_VALUE_ENCHANTMENT);
-		Integer graveyard = readValue(MTA_MAIN_VALUE_GRAVEYARD);
+		Integer telekinetic = readValue(InterfaceID.MAGICTRAINING_MAIN, MTA_MAIN_VALUE_TELEKINETIC);
+		Integer alchemist = readValue(InterfaceID.MAGICTRAINING_MAIN, MTA_MAIN_VALUE_ALCHEMIST);
+		Integer enchantment = readValue(InterfaceID.MAGICTRAINING_MAIN, MTA_MAIN_VALUE_ENCHANTMENT);
+		Integer graveyard = readValue(InterfaceID.MAGICTRAINING_MAIN, MTA_MAIN_VALUE_GRAVEYARD);
 
 		if (telekinetic == null || alchemist == null || enchantment == null || graveyard == null)
 		{
@@ -218,9 +259,9 @@ public class MtaGoalsPlugin extends Plugin
 		return points;
 	}
 
-	private Integer readValue(int childId)
+	private Integer readValue(int interfaceId, int childId)
 	{
-		Widget widget = client.getWidget(InterfaceID.MAGICTRAINING_MAIN, childId);
+		Widget widget = client.getWidget(interfaceId, childId);
 		if (widget == null || widget.getText() == null)
 		{
 			return null;
