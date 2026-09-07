@@ -1,10 +1,6 @@
 package com.camjewell.mtagoals;
 
 import com.google.inject.Provides;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 import javax.inject.Inject;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.Client;
@@ -14,7 +10,6 @@ import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.GameTick;
 import net.runelite.api.gameval.InterfaceID;
 import net.runelite.api.widgets.Widget;
-import net.runelite.api.widgets.WidgetType;
 import net.runelite.client.Notifier;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
@@ -42,7 +37,16 @@ public class MtaGoalsPlugin extends Plugin
 	 */
 	private static final int ARENA_REGION = 13462;
 
-	private static final Pattern NUMBER_ONLY = Pattern.compile("^[0-9][0-9,]*$");
+	/**
+	 * Child component IDs under {@link InterfaceID#MAGICTRAINING_MAIN}, confirmed via RuneLite's
+	 * Widget Inspector: 6-9 are the "Telekinetic:"/"Alchemist:"/"Enchantment:"/"Graveyard:" labels,
+	 * 10-13 are the paired point-total values in the same order (e.g. child 6's label pairs with
+	 * child 10's value). Live-verified against a real account's totals in-game.
+	 */
+	private static final int MTA_MAIN_VALUE_TELEKINETIC = 10;
+	private static final int MTA_MAIN_VALUE_ALCHEMIST = 11;
+	private static final int MTA_MAIN_VALUE_ENCHANTMENT = 12;
+	private static final int MTA_MAIN_VALUE_GRAVEYARD = 13;
 
 	@Inject
 	private Client client;
@@ -189,98 +193,45 @@ public class MtaGoalsPlugin extends Plugin
 	}
 
 	/**
-	 * Best-effort read of the native "points" HUD that OSRS shows while in the MTA lobby
-	 * (added per the 2024 Poll 81 quality-of-life vote). The exact widget layout isn't
-	 * publicly documented, so this scans every text child of the interface for the four
-	 * room names and pulls the nearest number rather than relying on fixed component IDs.
-	 * Returns null (rather than a partial result) if any of the four totals can't be found,
-	 * so a layout mismatch never reports incorrect numbers.
+	 * Reads the native "points" HUD that OSRS shows while in the MTA lobby (added per the
+	 * 2024 Poll 81 quality-of-life vote), via the fixed component IDs confirmed above.
+	 * Returns null (rather than a partial result) if the HUD isn't on screen or any of the
+	 * four totals fail to parse, so an unexpected layout never reports incorrect numbers.
 	 */
 	private int[] tryReadLobbyHud()
 	{
-		Widget root = client.getWidget(InterfaceID.MAGICTRAINING_MAIN, 0);
-		if (root == null)
+		Integer telekinetic = readValue(MTA_MAIN_VALUE_TELEKINETIC);
+		Integer alchemist = readValue(MTA_MAIN_VALUE_ALCHEMIST);
+		Integer enchantment = readValue(MTA_MAIN_VALUE_ENCHANTMENT);
+		Integer graveyard = readValue(MTA_MAIN_VALUE_GRAVEYARD);
+
+		if (telekinetic == null || alchemist == null || enchantment == null || graveyard == null)
 		{
 			return null;
 		}
 
-		List<Widget> textWidgets = new ArrayList<>();
-		collectTextWidgets(root, textWidgets);
-
 		int[] points = new int[PizazzRoom.ENTRIES.length];
-		for (PizazzRoom room : PizazzRoom.ENTRIES)
-		{
-			Integer value = extractRoomPoints(textWidgets, room);
-			if (value == null)
-			{
-				return null;
-			}
-			points[room.ordinal()] = value;
-		}
+		points[PizazzRoom.TELEKINETIC.ordinal()] = telekinetic;
+		points[PizazzRoom.ALCHEMIST.ordinal()] = alchemist;
+		points[PizazzRoom.ENCHANTMENT.ordinal()] = enchantment;
+		points[PizazzRoom.GRAVEYARD.ordinal()] = graveyard;
 		return points;
 	}
 
-	private void collectTextWidgets(Widget widget, List<Widget> out)
+	private Integer readValue(int childId)
 	{
-		if (widget == null)
+		Widget widget = client.getWidget(InterfaceID.MAGICTRAINING_MAIN, childId);
+		if (widget == null || widget.getText() == null)
 		{
-			return;
+			return null;
 		}
-		if (widget.getType() == WidgetType.TEXT && widget.getText() != null && !widget.getText().isEmpty())
+		try
 		{
-			out.add(widget);
+			return Integer.parseInt(Text.removeTags(widget.getText()).replace(",", "").trim());
 		}
-		Widget[] staticChildren = widget.getStaticChildren();
-		if (staticChildren != null)
+		catch (NumberFormatException e)
 		{
-			for (Widget child : staticChildren)
-			{
-				collectTextWidgets(child, out);
-			}
+			return null;
 		}
-		Widget[] dynamicChildren = widget.getDynamicChildren();
-		if (dynamicChildren != null)
-		{
-			for (Widget child : dynamicChildren)
-			{
-				collectTextWidgets(child, out);
-			}
-		}
-	}
-
-	private Integer extractRoomPoints(List<Widget> textWidgets, PizazzRoom room)
-	{
-		Pattern combined = Pattern.compile("(?i)" + Pattern.quote(room.shortName()) + "[^0-9]*([0-9][0-9,]*)");
-
-		for (int i = 0; i < textWidgets.size(); i++)
-		{
-			String text = Text.removeTags(textWidgets.get(i).getText());
-			String lower = text.toLowerCase();
-			if (!lower.contains(room.shortName().toLowerCase()) && !lower.contains(room.roomName().toLowerCase()))
-			{
-				continue;
-			}
-
-			Matcher matcher = combined.matcher(text);
-			if (matcher.find())
-			{
-				return parseNumber(matcher.group(1));
-			}
-
-			for (int j = i + 1; j < Math.min(i + 3, textWidgets.size()); j++)
-			{
-				String candidate = Text.removeTags(textWidgets.get(j).getText()).trim();
-				if (NUMBER_ONLY.matcher(candidate).matches())
-				{
-					return parseNumber(candidate);
-				}
-			}
-		}
-		return null;
-	}
-
-	private int parseNumber(String s)
-	{
-		return Integer.parseInt(s.replace(",", ""));
 	}
 }
