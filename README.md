@@ -42,14 +42,22 @@ reward-tracking overlay.
     8/point).
   - **Enchantment**: no fixed points-per-action exists (depends on spell
     level and dragonstone luck), so it's shown as estimated minutes/hours
-    remaining from an observed points-per-minute rate tracked over active
-    ticks spent in that room this session.
+    remaining from an observed points-per-minute rate instead.
   - **Show time estimates** (default on): appends a real-world
     `(~X min)`/`(~X.Y hr)` estimate to the Telekinetic/Alchemist/Graveyard
     action counts too, from that same per-room observed-pace tracking —
     since the fixed formulas give an exact action count but say nothing
     about how long each action actually takes a given player. Only shown
     once there's enough data; no placeholder in the meantime.
+  - The observed-pace rate (used for Enchantment's estimate and the other
+    three rooms' parenthetical) is a **rolling average**, not an all-session
+    average: it only looks at your last **Rate averaging window** minutes
+    (default 5, configurable) of active play in that room. If you slow down
+    partway through a session, the estimate follows that slowdown once
+    enough recent samples accumulate, rather than staying dragged toward an
+    earlier faster pace for the rest of the session. It resets if your
+    points ever drop (e.g. you bought something), and fully resets on
+    logout/world hop.
 
 ## Running the dev client
 

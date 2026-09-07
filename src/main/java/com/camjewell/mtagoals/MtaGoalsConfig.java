@@ -325,4 +325,19 @@ public interface MtaGoalsConfig extends Config
 	{
 		return true;
 	}
+
+	@ConfigItem(
+		section = ESTIMATES,
+		keyName = "rateWindowMinutes",
+		name = "Rate averaging window (min)",
+		description = "How many minutes of your most recent active play in a room the observed-pace rate averages "
+			+ "over. Shorter reacts faster to a real pace change (e.g. slowing down partway through a session); "
+			+ "longer is steadier against short-term noise.",
+		position = 3
+	)
+	@Range(min = 1, max = 60)
+	default int rateWindowMinutes()
+	{
+		return 5;
+	}
 }

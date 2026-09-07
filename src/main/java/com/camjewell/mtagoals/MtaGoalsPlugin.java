@@ -1,7 +1,10 @@
 package com.camjewell.mtagoals;
 
 import com.google.inject.Provides;
-import java.util.Arrays;
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Deque;
+import java.util.List;
 import javax.inject.Inject;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.Client;
@@ -76,18 +79,21 @@ public class MtaGoalsPlugin extends Plugin
 
 	/**
 	 * Every room's completion estimate can show an observed points-per-minute rate alongside
-	 * (or, for Enchantment, instead of) its fixed-formula action count: points gained since the
-	 * first reading this session in that room, divided by ticks actually spent playing it
-	 * (idle/away time excluded). One game tick is 0.6s, so 100 ticks = 1 minute. This is the
-	 * only way to estimate Enchantment at all (spell level and dragonstone luck vary too much
-	 * for a fixed formula); for the other three rooms it turns their exact action count into a
-	 * real-world time estimate, since how fast a player completes each action varies by skill.
+	 * (or, for Enchantment, instead of) its fixed-formula action count. The rate is a rolling
+	 * average over the last {@link MtaGoalsConfig#rateWindowMinutes()} minutes of active play in
+	 * that room (idle/away time excluded) rather than an all-session average, so it reflects
+	 * recent pace - if a player slows down partway through a session, the rate follows that
+	 * slowdown once enough recent samples accumulate, instead of staying dragged toward an
+	 * earlier faster pace forever. One game tick is 0.6s, so 100 ticks = 1 minute. This rolling
+	 * rate is the only way to estimate Enchantment at all (spell level and dragonstone luck vary
+	 * too much for a fixed formula); for the other three rooms it turns their exact action count
+	 * into a real-world time estimate, since how fast a player completes each action varies.
 	 */
 	private static final int TICKS_PER_MINUTE = 100;
 
 	/**
-	 * Minimum active ticks in a room before trusting its observed rate enough to show an
-	 * estimate, so a couple of lucky/unlucky early actions don't produce a wild number.
+	 * Minimum active ticks in a room's rolling window before trusting its observed rate enough
+	 * to show an estimate, so a couple of lucky/unlucky early actions don't produce a wild number.
 	 */
 	private static final int MIN_TICKS_FOR_RATE_ESTIMATE = TICKS_PER_MINUTE;
 
@@ -116,8 +122,7 @@ public class MtaGoalsPlugin extends Plugin
 	private boolean readingFromHud = false;
 	private boolean previouslyMetThreshold = false;
 
-	private final int[] roomRateBaselinePoints = new int[PizazzRoom.ENTRIES.length];
-	private final int[] roomRateActiveTicks = new int[PizazzRoom.ENTRIES.length];
+	private final List<Deque<Integer>> roomRateWindows = newRoomRateWindows();
 
 	private PizazzRoom lastRoom = null;
 	private int graveyardCapacitySnapshot = -1;
@@ -361,48 +366,68 @@ public class MtaGoalsPlugin extends Plugin
 		return null;
 	}
 
+	private static List<Deque<Integer>> newRoomRateWindows()
+	{
+		List<Deque<Integer>> windows = new ArrayList<>();
+		for (int i = 0; i < PizazzRoom.ENTRIES.length; i++)
+		{
+			windows.add(new ArrayDeque<>());
+		}
+		return windows;
+	}
+
 	private void resetRoomRates()
 	{
-		Arrays.fill(roomRateBaselinePoints, -1);
-		Arrays.fill(roomRateActiveTicks, 0);
+		for (Deque<Integer> window : roomRateWindows)
+		{
+			window.clear();
+		}
 	}
 
 	/**
-	 * Advances the given room's observed-rate tracking by one active tick. Establishes a fresh
-	 * baseline (rather than accumulating) the first time this session, or whenever the total
-	 * drops below the current baseline (e.g. the player spent points on a purchase), so the
-	 * rate never goes negative or counts a purchase as "zero points earned".
+	 * Records the given room's current points as one more sample in its rolling window - one
+	 * sample per active tick, oldest samples dropped once the window exceeds
+	 * {@link MtaGoalsConfig#rateWindowMinutes()}. Clears the window (rather than accumulating)
+	 * whenever points drop below the most recent sample (e.g. the player spent points on a
+	 * purchase), since that's not a real slowdown and would otherwise show a negative rate.
 	 */
 	private void updateRoomRate(PizazzRoom room)
 	{
-		int idx = room.ordinal();
-		int points = currentPoints[idx];
-		if (roomRateBaselinePoints[idx] < 0 || points < roomRateBaselinePoints[idx])
+		Deque<Integer> window = roomRateWindows.get(room.ordinal());
+		int points = currentPoints[room.ordinal()];
+
+		if (!window.isEmpty() && points < window.peekLast())
 		{
-			roomRateBaselinePoints[idx] = points;
-			roomRateActiveTicks[idx] = 0;
-			return;
+			window.clear();
 		}
-		roomRateActiveTicks[idx]++;
+
+		window.addLast(points);
+
+		int maxSamples = Math.max(config.rateWindowMinutes(), 1) * TICKS_PER_MINUTE + 1;
+		while (window.size() > maxSamples)
+		{
+			window.removeFirst();
+		}
 	}
 
 	/**
-	 * @return the given room's observed points-per-minute this session, or null if there isn't
-	 * yet enough active-tick data (or no points have been gained) to trust an estimate.
+	 * @return the given room's points-per-minute rate over its rolling window, or null if there
+	 * isn't yet enough active-tick data (or no points have been gained) to trust an estimate.
 	 */
 	Double getPointsPerMinute(PizazzRoom room)
 	{
-		int idx = room.ordinal();
-		if (roomRateBaselinePoints[idx] < 0 || roomRateActiveTicks[idx] < MIN_TICKS_FOR_RATE_ESTIMATE)
+		Deque<Integer> window = roomRateWindows.get(room.ordinal());
+		if (window.size() < MIN_TICKS_FOR_RATE_ESTIMATE + 1)
 		{
 			return null;
 		}
-		int gained = currentPoints[idx] - roomRateBaselinePoints[idx];
+		int gained = window.peekLast() - window.peekFirst();
 		if (gained <= 0)
 		{
 			return null;
 		}
-		return gained * (double) TICKS_PER_MINUTE / roomRateActiveTicks[idx];
+		int ticksElapsed = window.size() - 1;
+		return gained * (double) TICKS_PER_MINUTE / ticksElapsed;
 	}
 
 	private boolean tryUpdateRoom(PizazzRoom room, int interfaceId)
