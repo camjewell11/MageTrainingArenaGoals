@@ -16,6 +16,7 @@ import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.GameTick;
 import net.runelite.api.gameval.InterfaceID;
 import net.runelite.api.gameval.InventoryID;
+import net.runelite.api.gameval.ItemID;
 import net.runelite.api.widgets.Widget;
 import net.runelite.client.Notifier;
 import net.runelite.client.config.ConfigManager;
@@ -96,6 +97,29 @@ public class MtaGoalsPlugin extends Plugin
 	 * to show an estimate, so a couple of lucky/unlucky early actions don't produce a wild number.
 	 */
 	private static final int MIN_TICKS_FOR_RATE_ESTIMATE = TICKS_PER_MINUTE;
+
+	private static final int ALCHEMIST_GOLD_PER_POINT = 100;
+
+	/**
+	 * The Alchemist's Playground pays out in a room-specific "training gold" currency, not real
+	 * Coins (995) - confirmed via Widget Inspector: the inventory slot displaying "Coins" was
+	 * actually ItemID.MAGICTRAINING_COINS (8890), and its quantity (150) matched exactly 5 alchs
+	 * worth (5 x 30 gold). The _2 through _10000 variants are presumably alternate quantity-tier
+	 * sprites for the same stackable currency; checking all of them defends against an ID swap at
+	 * a higher stack size that hasn't been observed yet.
+	 */
+	private static final int[] ALCHEMIST_GOLD_ITEM_IDS = {
+		ItemID.MAGICTRAINING_COINS,
+		ItemID.MAGICTRAINING_COINS_2,
+		ItemID.MAGICTRAINING_COINS_3,
+		ItemID.MAGICTRAINING_COINS_4,
+		ItemID.MAGICTRAINING_COINS_5,
+		ItemID.MAGICTRAINING_COINS_25,
+		ItemID.MAGICTRAINING_COINS_100,
+		ItemID.MAGICTRAINING_COINS_250,
+		ItemID.MAGICTRAINING_COINS_1000,
+		ItemID.MAGICTRAINING_COINS_10000,
+	};
 
 	@Inject
 	private Client client;
@@ -385,16 +409,16 @@ public class MtaGoalsPlugin extends Plugin
 	}
 
 	/**
-	 * Records the given room's current points as one more sample in its rolling window - one
-	 * sample per active tick, oldest samples dropped once the window exceeds
+	 * Records the given room's current effective points as one more sample in its rolling
+	 * window - one sample per active tick, oldest samples dropped once the window exceeds
 	 * {@link MtaGoalsConfig#rateWindowMinutes()}. Clears the window (rather than accumulating)
-	 * whenever points drop below the most recent sample (e.g. the player spent points on a
+	 * whenever the value drops below the most recent sample (e.g. the player spent points on a
 	 * purchase), since that's not a real slowdown and would otherwise show a negative rate.
 	 */
 	private void updateRoomRate(PizazzRoom room)
 	{
 		Deque<Integer> window = roomRateWindows.get(room.ordinal());
-		int points = currentPoints[room.ordinal()];
+		int points = effectivePointsForRate(room);
 
 		if (!window.isEmpty() && points < window.peekLast())
 		{
@@ -408,6 +432,50 @@ public class MtaGoalsPlugin extends Plugin
 		{
 			window.removeFirst();
 		}
+	}
+
+	/**
+	 * The value fed into a room's rate window. Alchemist earns training gold into the inventory
+	 * well before it's deposited into banked points, so the banked total alone can stay flat for
+	 * minutes at a time even while the player is actively alching - without this, the rate would
+	 * never see any gain between deposits and getPointsPerMinute() would stay null forever under
+	 * a "hold gold, deposit occasionally" playstyle. Folding held gold in as fractional
+	 * banked-point-equivalents keeps the rate responsive to real-time progress instead.
+	 */
+	private int effectivePointsForRate(PizazzRoom room)
+	{
+		int banked = currentPoints[room.ordinal()];
+		if (room == PizazzRoom.ALCHEMIST)
+		{
+			return banked + getAlchemistGold() / ALCHEMIST_GOLD_PER_POINT;
+		}
+		return banked;
+	}
+
+	/**
+	 * @return training gold (see {@link #ALCHEMIST_GOLD_ITEM_IDS}) currently held in the
+	 * inventory, alched but not yet deposited.
+	 */
+	int getAlchemistGold()
+	{
+		ItemContainer inventory = client.getItemContainer(InventoryID.INV);
+		if (inventory == null)
+		{
+			return 0;
+		}
+		int gold = 0;
+		for (Item item : inventory.getItems())
+		{
+			for (int goldItemId : ALCHEMIST_GOLD_ITEM_IDS)
+			{
+				if (item.getId() == goldItemId)
+				{
+					gold += item.getQuantity();
+					break;
+				}
+			}
+		}
+		return gold;
 	}
 
 	/**

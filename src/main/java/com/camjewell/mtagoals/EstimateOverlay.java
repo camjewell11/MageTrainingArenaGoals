@@ -7,11 +7,6 @@ import java.awt.Point;
 import java.awt.Rectangle;
 import java.util.function.DoubleUnaryOperator;
 import javax.inject.Inject;
-import net.runelite.api.Client;
-import net.runelite.api.Item;
-import net.runelite.api.ItemContainer;
-import net.runelite.api.gameval.InventoryID;
-import net.runelite.api.gameval.ItemID;
 import net.runelite.client.ui.FontManager;
 import net.runelite.client.ui.overlay.OverlayPanel;
 import net.runelite.client.ui.overlay.OverlayPosition;
@@ -39,38 +34,15 @@ class EstimateOverlay extends OverlayPanel
 	private static final int ALCHEMIST_GOLD_PER_ALCH = 30;
 	private static final int ALCHEMIST_GOLD_PER_POINT = 100;
 
-	/**
-	 * The Alchemist's Playground pays out in a room-specific "training gold" currency, not real
-	 * Coins (995) - confirmed via Widget Inspector: the inventory slot displaying "Coins" was
-	 * actually ItemID.MAGICTRAINING_COINS (8890), and its quantity (150) matched exactly 5 alchs
-	 * worth (5 x 30 gold). The _2 through _10000 variants are presumably alternate quantity-tier
-	 * sprites for the same stackable currency; checking all of them defends against an ID swap at
-	 * a higher stack size that hasn't been observed yet.
-	 */
-	private static final int[] ALCHEMIST_GOLD_ITEM_IDS = {
-		ItemID.MAGICTRAINING_COINS,
-		ItemID.MAGICTRAINING_COINS_2,
-		ItemID.MAGICTRAINING_COINS_3,
-		ItemID.MAGICTRAINING_COINS_4,
-		ItemID.MAGICTRAINING_COINS_5,
-		ItemID.MAGICTRAINING_COINS_25,
-		ItemID.MAGICTRAINING_COINS_100,
-		ItemID.MAGICTRAINING_COINS_250,
-		ItemID.MAGICTRAINING_COINS_1000,
-		ItemID.MAGICTRAINING_COINS_10000,
-	};
-
 	private final MtaGoalsPlugin plugin;
 	private final MtaGoalsConfig config;
-	private final Client client;
 
 	@Inject
-	EstimateOverlay(MtaGoalsPlugin plugin, MtaGoalsConfig config, Client client)
+	EstimateOverlay(MtaGoalsPlugin plugin, MtaGoalsConfig config)
 	{
 		super(plugin);
 		this.plugin = plugin;
 		this.config = config;
-		this.client = client;
 
 		setPosition(OverlayPosition.TOP_RIGHT);
 		setPriority(PRIORITY_LOW);
@@ -151,7 +123,7 @@ class EstimateOverlay extends OverlayPanel
 		}
 
 		int goldNeeded = pointsRemaining * ALCHEMIST_GOLD_PER_POINT;
-		int netGoldNeeded = Math.max(goldNeeded - getAlchemistGold(), 0);
+		int netGoldNeeded = Math.max(goldNeeded - plugin.getAlchemistGold(), 0);
 		int items = (int) Math.ceil(netGoldNeeded / (double) ALCHEMIST_GOLD_PER_ALCH);
 		int effectivePointsRemaining = (int) Math.ceil(netGoldNeeded / (double) ALCHEMIST_GOLD_PER_POINT);
 		String text = items + " items" + formatTimeSuffix(PizazzRoom.ALCHEMIST, effectivePointsRemaining);
@@ -243,28 +215,6 @@ class EstimateOverlay extends OverlayPanel
 			return Math.max(1, (int) Math.ceil(minutes)) + " min";
 		}
 		return String.format("%.1f hr", minutes / 60.0);
-	}
-
-	private int getAlchemistGold()
-	{
-		ItemContainer inventory = client.getItemContainer(InventoryID.INV);
-		if (inventory == null)
-		{
-			return 0;
-		}
-		int gold = 0;
-		for (Item item : inventory.getItems())
-		{
-			for (int goldItemId : ALCHEMIST_GOLD_ITEM_IDS)
-			{
-				if (item.getId() == goldItemId)
-				{
-					gold += item.getQuantity();
-					break;
-				}
-			}
-		}
-		return gold;
 	}
 
 	private void addRow(String left, String right, Color rightColor, boolean header)
