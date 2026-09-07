@@ -51,11 +51,11 @@ public class MtaGoalsPlugin extends Plugin
 	/**
 	 * Each room also shows a live "Pizazz Points:" counter for just its own currency while
 	 * you're actually playing it, at the same child ID (6) in every room's interface -
-	 * confirmed via Widget Inspector for Telekinetic, Graveyard and Enchantment (identical
-	 * BACK_MODEL/_A/_B/_PTS widget layout at children 3-6 in all three), inferred for
-	 * Alchemist from that same pattern. Confirmed to be the same all-time banked total as
-	 * the lobby HUD, not a per-visit delta: reading it in Telekinetic went from 46 (the last
-	 * lobby reading) to 48 after completing one maze, matching the wiki's "+2 points per maze".
+	 * confirmed via Widget Inspector in all four rooms (identical BACK_MODEL/_A/_B/_PTS
+	 * widget layout at children 3-6 in each). Confirmed to be the same all-time banked total
+	 * as the lobby HUD, not a per-visit delta: reading it in Telekinetic went from 46 (the
+	 * last lobby reading) to 48 after completing one maze, matching the wiki's "+2 points
+	 * per maze".
 	 */
 	private static final int MTA_ROOM_PTS_CHILD = 6;
 
