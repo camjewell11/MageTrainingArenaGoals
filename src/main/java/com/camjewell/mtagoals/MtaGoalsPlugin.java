@@ -60,6 +60,17 @@ public class MtaGoalsPlugin extends Plugin
 	private static final int MTA_ROOM_PTS_CHILD = 6;
 
 	/**
+	 * Planes within {@link #ARENA_REGION} for the Alchemist's Playground, Creature Graveyard
+	 * and Enchanting Chamber, matching RuneLite's own built-in MTA plugin. Used as ground truth
+	 * for which room's widget to trust: a room's interface can stay loaded (so getWidget()
+	 * still returns non-null) after you've left it, just marked Hidden, so "is the widget
+	 * non-null" alone isn't reliable for figuring out which room you're actually in.
+	 */
+	private static final int PLANE_ENCHANTMENT = 0;
+	private static final int PLANE_GRAVEYARD = 1;
+	private static final int PLANE_ALCHEMIST = 2;
+
+	/**
 	 * Enchantment has no fixed points-per-action (it depends on spell level and dragonstone
 	 * doubling), so its completion estimate uses an observed points-per-minute rate instead:
 	 * points gained since the first reading this session, divided by ticks actually spent in
@@ -232,26 +243,66 @@ public class MtaGoalsPlugin extends Plugin
 	/**
 	 * Updates just the one room's total the player is currently playing, from that room's own
 	 * live "Pizazz Points:" counter, and returns which room that was. Unlike the lobby HUD this
-	 * never touches the other three rooms' totals, since only one room's widget can be on
-	 * screen at a time.
+	 * never touches the other three rooms' totals.
 	 */
 	private PizazzRoom tryUpdateFromRoomWidget()
 	{
-		if (tryUpdateRoom(PizazzRoom.TELEKINETIC, InterfaceID.MAGICTRAINING_TELE))
+		PizazzRoom room = currentRoom();
+		if (room == null)
+		{
+			return null;
+		}
+		int interfaceId;
+		switch (room)
+		{
+			case TELEKINETIC:
+				interfaceId = InterfaceID.MAGICTRAINING_TELE;
+				break;
+			case GRAVEYARD:
+				interfaceId = InterfaceID.MAGICTRAINING_GRAVE;
+				break;
+			case ENCHANTMENT:
+				interfaceId = InterfaceID.MAGICTRAINING_ENCHA;
+				break;
+			case ALCHEMIST:
+				interfaceId = InterfaceID.MAGICTRAINING_ALCHEM;
+				break;
+			default:
+				return null;
+		}
+		return tryUpdateRoom(room, interfaceId) ? room : null;
+	}
+
+	/**
+	 * Ground-truth "which room is the player actually standing in", by region/plane rather than
+	 * by widget presence - a room's interface can stay loaded (getWidget() still non-null, just
+	 * Hidden) after the player has left it, which previously let a stale widget from an
+	 * earlier-visited room win a fixed-priority check even while standing in a different room.
+	 */
+	private PizazzRoom currentRoom()
+	{
+		Player player = client.getLocalPlayer();
+		if (player != null && player.getWorldLocation().getRegionID() == ARENA_REGION)
+		{
+			switch (player.getWorldLocation().getPlane())
+			{
+				case PLANE_ENCHANTMENT:
+					return PizazzRoom.ENCHANTMENT;
+				case PLANE_GRAVEYARD:
+					return PizazzRoom.GRAVEYARD;
+				case PLANE_ALCHEMIST:
+					return PizazzRoom.ALCHEMIST;
+				default:
+					break;
+			}
+		}
+		// Telekinetic has no confirmed region, so widget visibility is the best available
+		// signal - guarded with isHidden() rather than just a non-null check, for the same
+		// stale-leftover-widget reason noted above.
+		Widget teleWidget = client.getWidget(InterfaceID.MAGICTRAINING_TELE, 0);
+		if (teleWidget != null && !teleWidget.isHidden())
 		{
 			return PizazzRoom.TELEKINETIC;
-		}
-		if (tryUpdateRoom(PizazzRoom.GRAVEYARD, InterfaceID.MAGICTRAINING_GRAVE))
-		{
-			return PizazzRoom.GRAVEYARD;
-		}
-		if (tryUpdateRoom(PizazzRoom.ENCHANTMENT, InterfaceID.MAGICTRAINING_ENCHA))
-		{
-			return PizazzRoom.ENCHANTMENT;
-		}
-		if (tryUpdateRoom(PizazzRoom.ALCHEMIST, InterfaceID.MAGICTRAINING_ALCHEM))
-		{
-			return PizazzRoom.ALCHEMIST;
 		}
 		return null;
 	}
@@ -343,7 +394,7 @@ public class MtaGoalsPlugin extends Plugin
 	private Integer readValue(int interfaceId, int childId)
 	{
 		Widget widget = client.getWidget(interfaceId, childId);
-		if (widget == null || widget.getText() == null)
+		if (widget == null || widget.isHidden() || widget.getText() == null)
 		{
 			return null;
 		}
