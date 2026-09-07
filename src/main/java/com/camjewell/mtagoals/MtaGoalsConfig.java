@@ -280,4 +280,36 @@ public interface MtaGoalsConfig extends Config
 	{
 		return true;
 	}
+
+	@ConfigSection(
+		name = "Completion Estimates",
+		description = "A second overlay estimating how much longer until your tracked reward goals are met.",
+		position = 3
+	)
+	String ESTIMATES = "Estimates";
+
+	@ConfigItem(
+		section = ESTIMATES,
+		keyName = "showEstimatesOverlay",
+		name = "Show estimates overlay",
+		description = "Toggle the mazes/inventories/items/time-remaining overlay",
+		position = 0
+	)
+	default boolean showEstimatesOverlay()
+	{
+		return true;
+	}
+
+	@ConfigItem(
+		section = ESTIMATES,
+		keyName = "graveyardFruit",
+		name = "Graveyard fruit",
+		description = "Which fruit you deposit in the Creature Graveyard, used to estimate inventories remaining "
+			+ "(peaches are worth twice as many points per fruit as bananas)",
+		position = 1
+	)
+	default GraveyardFruit graveyardFruit()
+	{
+		return GraveyardFruit.BANANAS;
+	}
 }

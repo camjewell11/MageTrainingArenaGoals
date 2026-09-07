@@ -59,6 +59,20 @@ public class MtaGoalsPlugin extends Plugin
 	 */
 	private static final int MTA_ROOM_PTS_CHILD = 6;
 
+	/**
+	 * Enchantment has no fixed points-per-action (it depends on spell level and dragonstone
+	 * doubling), so its completion estimate uses an observed points-per-minute rate instead:
+	 * points gained since the first reading this session, divided by ticks actually spent in
+	 * the room (idle/away time excluded). One game tick is 0.6s, so 100 ticks = 1 minute.
+	 */
+	private static final int TICKS_PER_MINUTE = 100;
+
+	/**
+	 * Minimum active ticks in the Enchanting Chamber before trusting the observed rate enough
+	 * to show an estimate, so a couple of lucky/unlucky early casts don't produce a wild number.
+	 */
+	private static final int MIN_TICKS_FOR_ENCHANT_ESTIMATE = TICKS_PER_MINUTE;
+
 	@Inject
 	private Client client;
 
@@ -74,12 +88,18 @@ public class MtaGoalsPlugin extends Plugin
 	@Inject
 	private GoalOverlay goalOverlay;
 
+	@Inject
+	private EstimateOverlay estimateOverlay;
+
 	private final Goal goal = new Goal();
 	private final int[] currentPoints = new int[PizazzRoom.ENTRIES.length];
 
 	private boolean livePointsAvailable = false;
 	private boolean readingFromHud = false;
 	private boolean previouslyMetThreshold = false;
+
+	private int enchantBaselinePoints = -1;
+	private int enchantActiveTicks = 0;
 
 	@Provides
 	MtaGoalsConfig provideConfig(ConfigManager configManager)
@@ -91,9 +111,12 @@ public class MtaGoalsPlugin extends Plugin
 	protected void startUp()
 	{
 		overlayManager.add(goalOverlay);
+		overlayManager.add(estimateOverlay);
 		livePointsAvailable = false;
 		readingFromHud = false;
 		previouslyMetThreshold = false;
+		enchantBaselinePoints = -1;
+		enchantActiveTicks = 0;
 		refresh();
 	}
 
@@ -101,6 +124,7 @@ public class MtaGoalsPlugin extends Plugin
 	protected void shutDown()
 	{
 		overlayManager.remove(goalOverlay);
+		overlayManager.remove(estimateOverlay);
 	}
 
 	@Subscribe
@@ -110,6 +134,8 @@ public class MtaGoalsPlugin extends Plugin
 		{
 			livePointsAvailable = false;
 			readingFromHud = false;
+			enchantBaselinePoints = -1;
+			enchantActiveTicks = 0;
 		}
 	}
 
@@ -186,10 +212,15 @@ public class MtaGoalsPlugin extends Plugin
 			return;
 		}
 
-		if (tryUpdateFromRoomWidget())
+		PizazzRoom activeRoom = tryUpdateFromRoomWidget();
+		if (activeRoom != null)
 		{
 			livePointsAvailable = true;
 			readingFromHud = true;
+			if (activeRoom == PizazzRoom.ENCHANTMENT)
+			{
+				updateEnchantmentRate();
+			}
 			return;
 		}
 
@@ -200,15 +231,65 @@ public class MtaGoalsPlugin extends Plugin
 
 	/**
 	 * Updates just the one room's total the player is currently playing, from that room's own
-	 * live "Pizazz Points:" counter. Unlike the lobby HUD this never touches the other three
-	 * rooms' totals, since only one room's widget can be on screen at a time.
+	 * live "Pizazz Points:" counter, and returns which room that was. Unlike the lobby HUD this
+	 * never touches the other three rooms' totals, since only one room's widget can be on
+	 * screen at a time.
 	 */
-	private boolean tryUpdateFromRoomWidget()
+	private PizazzRoom tryUpdateFromRoomWidget()
 	{
-		return tryUpdateRoom(PizazzRoom.TELEKINETIC, InterfaceID.MAGICTRAINING_TELE)
-			|| tryUpdateRoom(PizazzRoom.GRAVEYARD, InterfaceID.MAGICTRAINING_GRAVE)
-			|| tryUpdateRoom(PizazzRoom.ENCHANTMENT, InterfaceID.MAGICTRAINING_ENCHA)
-			|| tryUpdateRoom(PizazzRoom.ALCHEMIST, InterfaceID.MAGICTRAINING_ALCHEM);
+		if (tryUpdateRoom(PizazzRoom.TELEKINETIC, InterfaceID.MAGICTRAINING_TELE))
+		{
+			return PizazzRoom.TELEKINETIC;
+		}
+		if (tryUpdateRoom(PizazzRoom.GRAVEYARD, InterfaceID.MAGICTRAINING_GRAVE))
+		{
+			return PizazzRoom.GRAVEYARD;
+		}
+		if (tryUpdateRoom(PizazzRoom.ENCHANTMENT, InterfaceID.MAGICTRAINING_ENCHA))
+		{
+			return PizazzRoom.ENCHANTMENT;
+		}
+		if (tryUpdateRoom(PizazzRoom.ALCHEMIST, InterfaceID.MAGICTRAINING_ALCHEM))
+		{
+			return PizazzRoom.ALCHEMIST;
+		}
+		return null;
+	}
+
+	/**
+	 * Advances the Enchanting Chamber's observed-rate tracking by one active tick. Establishes
+	 * a fresh baseline (rather than accumulating) the first time this session, or whenever the
+	 * total drops below the current baseline (e.g. the player spent points on a purchase),
+	 * so the rate never goes negative or counts a purchase as "zero points earned".
+	 */
+	private void updateEnchantmentRate()
+	{
+		int points = currentPoints[PizazzRoom.ENCHANTMENT.ordinal()];
+		if (enchantBaselinePoints < 0 || points < enchantBaselinePoints)
+		{
+			enchantBaselinePoints = points;
+			enchantActiveTicks = 0;
+			return;
+		}
+		enchantActiveTicks++;
+	}
+
+	/**
+	 * @return observed Enchantment points-per-minute this session, or null if there isn't yet
+	 * enough active-tick data (or no points have been gained) to trust an estimate.
+	 */
+	Double getEnchantmentPointsPerMinute()
+	{
+		if (enchantBaselinePoints < 0 || enchantActiveTicks < MIN_TICKS_FOR_ENCHANT_ESTIMATE)
+		{
+			return null;
+		}
+		int gained = currentPoints[PizazzRoom.ENCHANTMENT.ordinal()] - enchantBaselinePoints;
+		if (gained <= 0)
+		{
+			return null;
+		}
+		return gained * (double) TICKS_PER_MINUTE / enchantActiveTicks;
 	}
 
 	private boolean tryUpdateRoom(PizazzRoom room, int interfaceId)
