@@ -3,7 +3,6 @@ plugins {
 }
 
 repositories {
-	mavenLocal()
 	maven {
 		url = 'https://repo.runelite.net'
 		content {
@@ -66,4 +65,39 @@ tasks.register('shadowJar', Jar) {
 	group = BasePlugin.BUILD_GROUP
 	archiveClassifier.set('shadow')
 	archiveFileName.set("${rootProject.name}-${project.version}-all.jar")
+}
+
+// --- Sideload sibling WIP plugins together in one dev client ---
+// Death Tracker and Boss Tracker are separate, independent Gradle projects (siblings of
+// this one). RuneLite has no directory it scans for arbitrary sideloaded jars - the only
+// way to load unofficial plugin classes is ExternalPluginManager.loadBuiltin(Class...),
+// which requires every plugin class on one JVM's classpath at launch. So: build each
+// sibling's shadowJar (a self-contained "-all.jar" with runelite-client/lombok/etc already
+// bundled), add those jars to this launcher's runtime classpath, and DevAllPluginsTest
+// calls loadBuiltin with all three plugin classes.
+def deathTrackerDir = "$rootDir/../DeathTracker"
+def bossTrackerDir = "$rootDir/../BossingInfo"
+
+tasks.register('buildDeathTrackerJar', Exec) {
+	onlyIf { file(deathTrackerDir).isDirectory() }
+	workingDir = file(deathTrackerDir)
+	commandLine 'cmd', '/c', file("$deathTrackerDir/gradlew.bat").absolutePath, 'shadowJar'
+}
+
+tasks.register('buildBossTrackerJar', Exec) {
+	onlyIf { file(bossTrackerDir).isDirectory() }
+	workingDir = file(bossTrackerDir)
+	commandLine 'cmd', '/c', file("$bossTrackerDir/gradlew.bat").absolutePath, 'shadowJar'
+}
+
+tasks.register('runAll', JavaExec) {
+	dependsOn 'testClasses', 'buildDeathTrackerJar', 'buildBossTrackerJar'
+
+	classpath = sourceSets.test.runtimeClasspath +
+		fileTree(dir: "$deathTrackerDir/build/libs", include: '*-all.jar') +
+		fileTree(dir: "$bossTrackerDir/build/libs", include: '*-all.jar')
+	mainClass = 'com.camjewell.mtagoals.DevAllPluginsTest'
+
+	jvmArgs "-ea"
+	args "--developer-mode", "--debug"
 }
